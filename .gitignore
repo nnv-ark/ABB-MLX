@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/xcode/
+.swiftpm/xcode-package.xcworkspace/
+.swiftpm/configuration/
+Package.pins
+
+# Xcode
+*.xcodeproj/xcuserdata/
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# Misc
+*.swp
+*~
