@@ -1,20 +1,14 @@
 class AbbMlx < Formula
   desc "Menu-bar app serving local MLX LLMs via an OpenAI-compatible HTTP API"
-  homepage "https://github.com/OWNER/ABB-MLX"
+  homepage "https://github.com/nnv-ark/ABB-MLX"
+  url "https://github.com/nnv-ark/ABB-MLX/archive/refs/tags/v1.0.0-beta.tar.gz"
+  version "1.0.0-beta"
+  sha256 "92531b213f3e344481c734a09d74e9d2dd39722652ec2ca185fe691a96dbe51c"
   # TODO: the project README carries only a copyright line, not an OSI license.
   # Set a real SPDX identifier before publishing a public tap, e.g.:
   # license "MIT"
 
-  # No stable release exists yet, so install from source with --HEAD:
-  #   brew install --HEAD OWNER/abb-mlx/abb-mlx
-  head "https://github.com/OWNER/ABB-MLX.git", branch: "main"
-
-  # After you cut GitHub release tag v1.0.0-beta, uncomment this block and fill
-  # in the tarball sha256 (`shasum -a 256 <downloaded>.tar.gz`) so a plain
-  # `brew install abb-mlx` works without --HEAD:
-  # url "https://github.com/OWNER/ABB-MLX/archive/refs/tags/v1.0.0-beta.tar.gz"
-  # sha256 "REPLACE_WITH_TARBALL_SHA256"
-  # version "1.0.0-beta"
+  head "https://github.com/nnv-ark/ABB-MLX.git", branch: "main"
 
   # MLX is Apple-Silicon only; the package targets macOS 14 (Sonoma); and
   # compiling MLX's Metal shaders needs the full Xcode toolchain, not just CLT.
@@ -43,8 +37,8 @@ class AbbMlx < Formula
       abb-mlx is a menu-bar app (LSUIElement) — launching it adds a CPU icon to
       the menu bar; it has no Dock icon and no window. Start it with:
         abb-mlx
-      Then click the menu-bar icon, pick a model already in
-      ~/.cache/huggingface/hub, and click Start.
+      Click the menu-bar icon; if no model is installed yet, pick one from the
+      built-in download list, then click Start once it finishes.
 
       To wire it into Xcode: Settings -> Coding Intelligence -> Chat ->
       Add a Chat Provider... -> Localhost, URL http://localhost:8080.
