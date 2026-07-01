@@ -37,6 +37,7 @@ gh repo create OWNER/homebrew-abb-mlx --public --source=. --remote=origin --push
 
 ```bash
 brew tap OWNER/abb-mlx           # adds OWNER/homebrew-abb-mlx
+brew trust OWNER/abb-mlx         # Homebrew 6+ blocks loading formulae from untrusted taps
 brew install --HEAD abb-mlx      # builds from main
 abb-mlx                          # launches the menu-bar app
 ```
