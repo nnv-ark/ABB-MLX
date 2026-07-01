@@ -22,7 +22,18 @@ final class ServerController {
     var installed: [ModelRegistry.Installed] = []
     var lastError: String?
 
+    // Downloads
+    var downloadProgress: [String: Double] = [:]   // repoId -> 0...1 while in flight
+    var downloadErrors: [String: String] = [:]      // repoId -> message
+
+    /// Catalog entries not already installed, for the download picker.
+    var downloadable: [CatalogEntry] {
+        let installedIds = Set(installed.map(\.id))
+        return ModelCatalog.all.filter { !installedIds.contains($0.repoId) }
+    }
+
     private let server = ABBMLXServer()
+    private let downloader = ModelDownloader()
 
     init() {
         let defaults = UserDefaults.standard
@@ -66,6 +77,26 @@ final class ServerController {
     func stop() async {
         await server.stop()
         isRunning = await server.isRunning
+    }
+
+    func download(_ entry: CatalogEntry) {
+        guard downloadProgress[entry.repoId] == nil else { return }
+        downloadErrors[entry.repoId] = nil
+        downloadProgress[entry.repoId] = 0
+        Task {
+            do {
+                try await downloader.download(id: entry.repoId) { progress in
+                    Task { @MainActor in
+                        self.downloadProgress[entry.repoId] = progress.fraction
+                    }
+                }
+                downloadProgress[entry.repoId] = nil
+                refresh()
+            } catch {
+                downloadProgress[entry.repoId] = nil
+                downloadErrors[entry.repoId] = error.localizedDescription
+            }
+        }
     }
 
     func copyBaseURLToClipboard() {

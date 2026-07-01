@@ -13,6 +13,7 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.21.2"),
         .package(url: "https://github.com/ml-explore/mlx-swift-examples", from: "2.21.2"),
         .package(url: "https://github.com/hummingbird-project/hummingbird", from: "2.5.0"),
+        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.0.0"),
     ],
     targets: [
         .target(
@@ -23,6 +24,7 @@ let package = Package(
                 .product(name: "MLXEmbedders", package: "mlx-swift-examples"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
+                .product(name: "Hub", package: "swift-transformers"),
             ]
         ),
         .target(

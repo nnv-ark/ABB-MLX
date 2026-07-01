@@ -98,30 +98,61 @@ public actor ABBMLXServer {
         )
     }
 
-    // MARK: - Chat (sync)
+    // MARK: - Helpers
 
-    private static func syncChat(body: ChatRequest, engine: MLXEngine) async throws -> ChatResponse {
-        let params = MLXEngine.GenerationParameters(
+    private static func parameters(from body: ChatRequest) -> MLXEngine.GenerationParameters {
+        MLXEngine.GenerationParameters(
             temperature: body.temperature ?? 0.7,
             topP: body.top_p ?? 1.0,
             maxTokens: body.max_tokens ?? 1024,
             seed: body.seed
         )
-        var full = ""
-        let stream = await engine.generate(
-            modelId: body.model, messages: body.messages, parameters: params
+    }
+
+    private static func payload(_ tc: MLXEngine.ToolCallData, index: Int) -> ToolCallPayload {
+        ToolCallPayload(
+            id: "call_" + String(UUID().uuidString.prefix(8)),
+            index: index,
+            function: FunctionCall(name: tc.name, arguments: tc.argumentsJSON)
         )
-        for try await chunk in stream { full += chunk }
+    }
+
+    // MARK: - Chat (sync)
+
+    private static func syncChat(body: ChatRequest, engine: MLXEngine) async throws -> ChatResponse {
+        var full = ""
+        var toolCalls: [ToolCallPayload] = []
+        var usage: ChatUsage?
+        var reason = "stop"
+
+        let stream = await engine.generateEvents(
+            modelId: body.model, messages: body.messages, tools: body.tools,
+            parameters: parameters(from: body), stop: body.stop ?? []
+        )
+        for try await event in stream {
+            switch event {
+            case .text(let t): full += t
+            case .toolCall(let tc): toolCalls.append(payload(tc, index: toolCalls.count))
+            case .finished(let u, let r):
+                reason = r
+                if let u {
+                    usage = ChatUsage(prompt_tokens: u.promptTokens,
+                                      completion_tokens: u.completionTokens,
+                                      total_tokens: u.promptTokens + u.completionTokens)
+                }
+            }
+        }
+
         let id = "chatcmpl-" + UUID().uuidString
         let now = Int(Date().timeIntervalSince1970)
-        let choice = ChatChoice(
-            index: 0,
-            message: ChatChoiceMessage(role: .assistant, content: full),
-            delta: nil,
-            finish_reason: "stop"
+        let message = ChatChoiceMessage(
+            role: .assistant,
+            content: toolCalls.isEmpty ? full : (full.isEmpty ? nil : full),
+            tool_calls: toolCalls.isEmpty ? nil : toolCalls
         )
+        let choice = ChatChoice(index: 0, message: message, delta: nil, finish_reason: reason)
         return ChatResponse(id: id, object: "chat.completion", created: now,
-                            model: body.model, choices: [choice], usage: nil)
+                            model: body.model, choices: [choice], usage: usage)
     }
 
     // MARK: - Chat (streaming SSE)
@@ -130,51 +161,66 @@ public actor ABBMLXServer {
         let id = "chatcmpl-" + UUID().uuidString
         let now = Int(Date().timeIntervalSince1970)
         let model = body.model
-
-        let params = MLXEngine.GenerationParameters(
-            temperature: body.temperature ?? 0.7,
-            topP: body.top_p ?? 1.0,
-            maxTokens: body.max_tokens ?? 1024,
-            seed: body.seed
-        )
+        let params = parameters(from: body)
+        let includeUsage = body.stream_options?.include_usage ?? false
 
         let responseBody = ResponseBody { (writer: inout any ResponseBodyWriter) in
-            do {
-                let stream = await engine.generate(
-                    modelId: model, messages: body.messages, parameters: params
-                )
-                let encoder = JSONEncoder()
-                var previous = ""
-                for try await chunk in stream {
-                    let delta: String
-                    if chunk.hasPrefix(previous) {
-                        delta = String(chunk.dropFirst(previous.count))
-                    } else {
-                        delta = chunk
-                    }
-                    previous = chunk
-                    guard !delta.isEmpty else { continue }
-                    let payload = ChatResponse(
-                        id: id, object: "chat.completion.chunk", created: now, model: model,
-                        choices: [ChatChoice(
-                            index: 0, message: nil,
-                            delta: ChatChoiceMessage(role: .assistant, content: delta),
-                            finish_reason: nil)],
-                        usage: nil)
-                    let data = try encoder.encode(payload)
-                    try await writer.write(ByteBuffer(string: "data: "))
-                    try await writer.write(ByteBuffer(bytes: data))
-                    try await writer.write(ByteBuffer(string: "\n\n"))
-                }
-                let final = ChatResponse(
+            let encoder = JSONEncoder()
+            // Encodes one SSE frame without touching `writer` (so it isn't captured).
+            func frame(_ value: ChatResponse) throws -> ByteBuffer {
+                var buf = ByteBuffer()
+                buf.writeString("data: ")
+                buf.writeBytes(try encoder.encode(value))
+                buf.writeString("\n\n")
+                return buf
+            }
+            func chunk(delta: ChatChoiceMessage?, finish: String?) -> ChatResponse {
+                ChatResponse(
                     id: id, object: "chat.completion.chunk", created: now, model: model,
-                    choices: [ChatChoice(index: 0, message: nil, delta: nil,
-                                          finish_reason: "stop")],
+                    choices: [ChatChoice(index: 0, message: nil, delta: delta,
+                                         finish_reason: finish)],
                     usage: nil)
-                let data = try encoder.encode(final)
-                try await writer.write(ByteBuffer(string: "data: "))
-                try await writer.write(ByteBuffer(bytes: data))
-                try await writer.write(ByteBuffer(string: "\n\ndata: [DONE]\n\n"))
+            }
+
+            do {
+                let stream = await engine.generateEvents(
+                    modelId: model, messages: body.messages, tools: body.tools,
+                    parameters: params, stop: body.stop ?? []
+                )
+                var reason = "stop"
+                var usage: ChatUsage?
+                var toolIndex = 0
+
+                for try await event in stream {
+                    switch event {
+                    case .text(let t):
+                        guard !t.isEmpty else { continue }
+                        try await writer.write(frame(chunk(
+                            delta: ChatChoiceMessage(role: .assistant, content: t),
+                            finish: nil)))
+                    case .toolCall(let tc):
+                        let call = payload(tc, index: toolIndex); toolIndex += 1
+                        try await writer.write(frame(chunk(
+                            delta: ChatChoiceMessage(role: .assistant, content: nil,
+                                                     tool_calls: [call]),
+                            finish: nil)))
+                    case .finished(let u, let r):
+                        reason = r
+                        if let u {
+                            usage = ChatUsage(prompt_tokens: u.promptTokens,
+                                              completion_tokens: u.completionTokens,
+                                              total_tokens: u.promptTokens + u.completionTokens)
+                        }
+                    }
+                }
+
+                try await writer.write(frame(chunk(delta: nil, finish: reason)))
+                if includeUsage, let usage {
+                    try await writer.write(frame(ChatResponse(
+                        id: id, object: "chat.completion.chunk", created: now, model: model,
+                        choices: [], usage: usage)))
+                }
+                try await writer.write(ByteBuffer(string: "data: [DONE]\n\n"))
                 try await writer.finish(nil)
             } catch {
                 try? await writer.finish(nil)

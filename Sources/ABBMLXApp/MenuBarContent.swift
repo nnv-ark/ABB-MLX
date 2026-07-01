@@ -10,6 +10,9 @@ struct MenuBarContent: View {
             header
             Divider()
             modelSection
+            if !controller.downloadable.isEmpty {
+                downloadSection
+            }
             portSection
             if let err = controller.lastError {
                 Text(err)
@@ -54,7 +57,7 @@ struct MenuBarContent: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Model").font(.caption).foregroundStyle(.secondary)
             if controller.installed.isEmpty {
-                Text("No MLX models found in ~/.cache/huggingface/hub")
+                Text("No models downloaded yet — pick one below")
                     .font(.caption)
                     .foregroundStyle(.orange)
             } else {
@@ -65,6 +68,39 @@ struct MenuBarContent: View {
                 }
                 .labelsHidden()
                 .disabled(controller.isRunning)
+            }
+        }
+    }
+
+    private var downloadSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Download a model").font(.caption).foregroundStyle(.secondary)
+            ForEach(controller.downloadable) { entry in
+                downloadRow(for: entry)
+            }
+        }
+    }
+
+    private func downloadRow(for entry: CatalogEntry) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(entry.displayName).font(.caption)
+                    Text(entry.summary).font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let fraction = controller.downloadProgress[entry.repoId] {
+                    ProgressView(value: fraction)
+                        .frame(width: 80)
+                } else {
+                    Button("Get (\(String(format: "%.1f", entry.approxSizeGB)) GB)") {
+                        controller.download(entry)
+                    }
+                    .controlSize(.small)
+                }
+            }
+            if let err = controller.downloadErrors[entry.repoId] {
+                Text(err).font(.caption2).foregroundStyle(.red).lineLimit(2)
             }
         }
     }
