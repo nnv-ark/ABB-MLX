@@ -14,6 +14,7 @@ struct MenuBarContent: View {
                 downloadSection
             }
             portSection
+            modelsDirectoryRow
             if let err = controller.lastError {
                 Text(err)
                     .foregroundStyle(.red)
@@ -119,6 +120,25 @@ struct MenuBarContent: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .font(.caption)
+        }
+    }
+
+    private var modelsDirectoryRow: some View {
+        HStack {
+            Text("Models folder").font(.caption2).foregroundStyle(.secondary)
+            Text(controller.modelsDirectory)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.head)
+            Spacer()
+            Button {
+                controller.revealModelsDirectoryInFinder()
+            } label: {
+                Image(systemName: "folder")
+            }
+            .buttonStyle(.plain)
+            .help("Reveal in Finder")
         }
     }
 

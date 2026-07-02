@@ -2,16 +2,19 @@ import Foundation
 import Hub
 import MLXLMCommon
 
-/// Downloads a model's weights and config into the exact cache location
-/// `LLMModelFactory` reads from (`defaultHubApi`), so a completed download
-/// is immediately loadable via `MLXEngine.load(modelId:)` with no extra
-/// wiring — one download mechanism, one cache, no separate bookkeeping.
+/// Downloads a model's weights and config using a caller-configured `HubApi`,
+/// so a completed download lands in the exact same location `MLXEngine`
+/// (given the same `hub`) reads from — one download mechanism, one cache,
+/// no separate bookkeeping.
 public actor ModelDownloader {
     public struct DownloadProgress: Sendable { public let fraction: Double }
 
     public private(set) var activeDownloads: Set<String> = []
+    private let hub: HubApi
 
-    public init() {}
+    public init(hub: HubApi) {
+        self.hub = hub
+    }
 
     /// Fetches weights (`*.safetensors`), config/tokenizer JSON (`*.json`),
     /// and BPE merge tables (`*.txt`) — the full set a text model needs to
@@ -27,7 +30,7 @@ public actor ModelDownloader {
         defer { activeDownloads.remove(id) }
 
         let repo = Hub.Repo(id: id)
-        _ = try await sharedHub.snapshot(
+        _ = try await hub.snapshot(
             from: repo,
             matching: ["*.safetensors", "*.json", "*.txt"]
         ) { progress in

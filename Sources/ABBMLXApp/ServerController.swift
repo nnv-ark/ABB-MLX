@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Hub
 import ABBMLXCore
 import ABBMLXServer
 
@@ -15,6 +16,12 @@ final class ServerController {
     }
     var autoStart: Bool {
         didSet { UserDefaults.standard.set(autoStart, forKey: "abbmlx.autoStart") }
+    }
+    /// Where model weights are stored/read from. Applies on next launch —
+    /// changing it while running doesn't hot-swap the already-constructed
+    /// engine/downloader, which is a reasonable simplification for now.
+    var modelsDirectory: String {
+        didSet { UserDefaults.standard.set(modelsDirectory, forKey: "abbmlx.modelsDirectory") }
     }
 
     // Live state
@@ -32,14 +39,27 @@ final class ServerController {
         return ModelCatalog.all.filter { !installedIds.contains($0.repoId) }
     }
 
-    private let server = ABBMLXServer()
-    private let downloader = ModelDownloader()
+    /// Configured once at launch from `modelsDirectory`; every model lookup
+    /// (registry scan, download, load) goes through this same `HubApi` so
+    /// "installed" and "loadable" always agree.
+    private let hub: HubApi
+    private let server: ABBMLXServer
+    private let downloader: ModelDownloader
 
     init() {
         let defaults = UserDefaults.standard
         self.port = defaults.object(forKey: "abbmlx.port") as? Int ?? 8080
         self.selectedModel = defaults.string(forKey: "abbmlx.model") ?? ""
         self.autoStart = defaults.object(forKey: "abbmlx.autoStart") as? Bool ?? true
+        let defaultModelsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Developer/LLM").path
+        let modelsDirectory = defaults.string(forKey: "abbmlx.modelsDirectory") ?? defaultModelsDir
+        self.modelsDirectory = modelsDirectory
+
+        let hub = HubApi(downloadBase: URL(fileURLWithPath: modelsDirectory))
+        self.hub = hub
+        self.server = ABBMLXServer(hub: hub, engine: MLXEngine(hub: hub), embedEngine: EmbeddingEngine(hub: hub))
+        self.downloader = ModelDownloader(hub: hub)
 
         refresh()
 
@@ -51,7 +71,7 @@ final class ServerController {
     var baseURL: String { "http://localhost:\(port)" }
 
     func refresh() {
-        installed = ModelRegistry.scan().filter { !ModelRegistry.isVisionModel($0.id) }
+        installed = ModelRegistry.scan(hub: hub).filter { !ModelRegistry.isVisionModel($0.id) }
         if selectedModel.isEmpty, let first = installed.first {
             selectedModel = first.id
         } else if !installed.contains(where: { $0.id == selectedModel }),
@@ -103,5 +123,9 @@ final class ServerController {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(baseURL, forType: .string)
+    }
+
+    func revealModelsDirectoryInFinder() {
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: modelsDirectory)
     }
 }

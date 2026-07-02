@@ -1,4 +1,5 @@
 import Foundation
+import Hub
 import MLX
 import MLXEmbedders
 
@@ -6,14 +7,17 @@ import MLXEmbedders
 public actor EmbeddingEngine {
     public private(set) var currentModelId: String?
     private var container: ModelContainer?
+    private let hub: HubApi
 
-    public init() {}
+    public init(hub: HubApi) {
+        self.hub = hub
+    }
 
     public func load(modelId: String) async throws {
         if currentModelId == modelId, container != nil { return }
         container = nil
         let configuration = ModelConfiguration(id: modelId)
-        container = try await MLXEmbedders.loadModelContainer(configuration: configuration)
+        container = try await MLXEmbedders.loadModelContainer(hub: hub, configuration: configuration)
         currentModelId = modelId
     }
 

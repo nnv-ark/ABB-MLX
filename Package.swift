@@ -32,11 +32,15 @@ let package = Package(
             dependencies: [
                 "ABBMLXCore",
                 .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "Hub", package: "swift-transformers"),
             ]
         ),
         .executableTarget(
             name: "ABBMLXApp",
-            dependencies: ["ABBMLXServer", "ABBMLXCore"],
+            dependencies: [
+                "ABBMLXServer", "ABBMLXCore",
+                .product(name: "Hub", package: "swift-transformers"),
+            ],
             exclude: ["Resources/Info.plist"]
         ),
     ]

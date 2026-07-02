@@ -1,20 +1,15 @@
 import Foundation
 import Hub
-@preconcurrency import MLXLMCommon
+import MLXLMCommon
 
-/// `defaultHubApi` is a library-level `var`, initialized once at process
-/// start and never reassigned. `HubApi` itself is `Sendable`; the
-/// `@preconcurrency` import above is what's needed to read this specific
-/// un-isolated global from Swift 6 strict-concurrency code.
-let sharedHub = defaultHubApi
-
-/// Scans the on-disk cache `LLMModelFactory` actually reads from and writes
-/// to (`defaultHubApi`, which resolves to `~/Library/Caches/models/<org>/<repo>`)
-/// — deliberately NOT `~/.cache/huggingface/hub` (the Python `huggingface_hub`
-/// convention), which is a different, unrelated cache that this app's MLX
-/// stack never touches. A model whose directory merely exists there is not
-/// necessarily loadable; `isComplete` verifies the weight shards are actually
-/// present before calling something "installed".
+/// Scans the on-disk cache a given `HubApi` reads from and writes to.
+/// Deliberately NOT hardcoded to `~/.cache/huggingface/hub` (the Python
+/// `huggingface_hub` convention) or any other fixed location — the caller
+/// (`ServerController`) owns the configured `HubApi`/storage directory and
+/// passes it in explicitly, so every part of the app agrees on where models
+/// actually live. A model whose directory merely exists is not necessarily
+/// loadable; `isComplete` verifies the weight shards are actually present
+/// before calling something "installed".
 public enum ModelRegistry {
     public struct Installed: Sendable, Equatable {
         public let id: String           // e.g. mlx-community/Qwen2.5-7B-Instruct-4bit
@@ -33,19 +28,18 @@ public enum ModelRegistry {
         return markers.contains(where: { n.contains($0) })
     }
 
-    /// The on-disk directory for `id`, matching exactly where
-    /// `LLMModelFactory.shared.loadContainer` looks/writes. Derived from
-    /// `defaultHubApi` itself (rather than re-deriving `~/Library/Caches`)
-    /// so this stays correct if that default ever changes upstream.
-    public static func repoDirectory(id: String) -> URL {
-        sharedHub.localRepoLocation(Hub.Repo(id: id))
+    /// The on-disk directory for `id` under `hub`'s configured storage
+    /// location, matching exactly where `LLMModelFactory.loadContainer(hub:)`
+    /// looks/writes when given the same `hub`.
+    public static func repoDirectory(id: String, hub: HubApi) -> URL {
+        hub.localRepoLocation(Hub.Repo(id: id))
     }
 
     /// The root "models" directory two levels above any repo location,
     /// used to discover whatever has been downloaded without needing a
     /// hardcoded model list.
-    private static var modelsRoot: URL {
-        repoDirectory(id: "_placeholder_/_placeholder_")
+    private static func modelsRoot(hub: HubApi) -> URL {
+        repoDirectory(id: "_placeholder_/_placeholder_", hub: hub)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
     }
@@ -55,8 +49,8 @@ public enum ModelRegistry {
     /// This is the check that was missing before: a repo directory can be
     /// created (and even contain small config/tokenizer files) while the
     /// multi-gigabyte weights themselves never finished downloading.
-    public static func isComplete(id: String) -> Bool {
-        let dir = repoDirectory(id: id)
+    public static func isComplete(id: String, hub: HubApi) -> Bool {
+        let dir = repoDirectory(id: id, hub: hub)
         let fm = FileManager.default
 
         func nonEmpty(_ url: URL) -> Bool {
@@ -79,10 +73,10 @@ public enum ModelRegistry {
         return nonEmpty(dir.appendingPathComponent("model.safetensors"))
     }
 
-    public static func scan() -> [Installed] {
+    public static func scan(hub: HubApi) -> [Installed] {
         let fm = FileManager.default
         guard let orgDirs = try? fm.contentsOfDirectory(
-            at: modelsRoot, includingPropertiesForKeys: [.isDirectoryKey]
+            at: modelsRoot(hub: hub), includingPropertiesForKeys: [.isDirectoryKey]
         ) else { return [] }
 
         var out: [Installed] = []
@@ -97,7 +91,7 @@ public enum ModelRegistry {
                 guard (try? repoURL.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
                 else { continue }
                 let id = "\(orgURL.lastPathComponent)/\(repoURL.lastPathComponent)"
-                guard isComplete(id: id) else { continue }
+                guard isComplete(id: id, hub: hub) else { continue }
 
                 var size: Int64 = 0
                 if let walker = fm.enumerator(

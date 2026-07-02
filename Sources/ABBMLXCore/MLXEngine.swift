@@ -1,4 +1,5 @@
 import Foundation
+import Hub
 import MLX
 import MLXLLM
 import MLXLMCommon
@@ -46,6 +47,7 @@ public actor MLXEngine {
 
     public private(set) var currentModelId: String?
     private var container: ModelContainer?
+    private let hub: HubApi
 
     /// Metal buffer cache limit. The old hard-coded 20 MB minimized idle
     /// memory but forced constant reallocation during generation; expose it so
@@ -53,7 +55,12 @@ public actor MLXEngine {
     private var gpuCacheLimit = 20 * 1024 * 1024
     public func setGPUCacheLimit(_ bytes: Int) { gpuCacheLimit = bytes }
 
-    public init() {}
+    /// `hub` determines where model weights are read from/written to; pass
+    /// the same configured `HubApi` used elsewhere in the app (registry,
+    /// downloader) so "installed" and "loadable" always agree.
+    public init(hub: HubApi) {
+        self.hub = hub
+    }
 
     /// Load (or switch to) a model by Hugging Face id, e.g.
     /// "mlx-community/Qwen2.5-7B-Instruct-4bit". Idempotent — re-loading
@@ -76,7 +83,7 @@ public actor MLXEngine {
             configuration = ModelConfiguration(id: modelId)
         }
         let loaded = try await LLMModelFactory.shared.loadContainer(
-            configuration: configuration
+            hub: hub, configuration: configuration
         ) { progress in
             onProgress(LoadProgress(fraction: progress.fractionCompleted))
         }

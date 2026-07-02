@@ -1,4 +1,5 @@
 import Foundation
+import Hub
 import Hummingbird
 import ABBMLXCore
 
@@ -12,12 +13,20 @@ public actor ABBMLXServer {
         }
     }
 
-    private let engine = MLXEngine()
-    private let embedEngine = EmbeddingEngine()
+    private let hub: HubApi
+    private let engine: MLXEngine
+    private let embedEngine: EmbeddingEngine
     private var task: Task<Void, Error>?
     public private(set) var isRunning = false
 
-    public init() {}
+    /// Engines are injected (rather than constructed here) so the caller's
+    /// configured model-storage `HubApi` is the single source of truth —
+    /// `hub` is also used directly for the live `/v1/models` listing.
+    public init(hub: HubApi, engine: MLXEngine, embedEngine: EmbeddingEngine) {
+        self.hub = hub
+        self.engine = engine
+        self.embedEngine = embedEngine
+    }
 
     public func start(config: Config = .init()) async throws {
         guard !isRunning else { return }
@@ -44,13 +53,14 @@ public actor ABBMLXServer {
     private func registerRoutes(on router: Router<BasicRequestContext>) {
         let engine = self.engine
         let embedEngine = self.embedEngine
+        let hub = self.hub
 
         router.get("/health") { _, _ -> Response in
             Self.jsonResponse(["status": "ok", "service": "ABB-MLX"])
         }
 
         router.get("/v1/models") { _, _ -> Response in
-            let installed = ModelRegistry.scan()
+            let installed = ModelRegistry.scan(hub: hub)
                 .filter { !ModelRegistry.isVisionModel($0.id) }
             let now = Int(Date().timeIntervalSince1970)
             let resp = ModelsResponse(
